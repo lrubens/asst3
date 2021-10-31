@@ -27,6 +27,26 @@ static inline int nextPow2(int n) {
     return n;
 }
 
+__global__ void exclusive_scan_upsweep(int *out, int *in, int N, int two_d, int two_dplus1) {
+    int tid = (blockIdx.x * blockDim.x + threadIdx.x) * two_dplus1;
+    // if(tid < N/two_dplus1)
+    if (tid < N)
+        out[tid + two_dplus1-1] += out[tid+two_d-1];
+}
+
+__global__ void exclusive_scan_downsweep(int *out, int *in, int N, int two_d, int two_dplus1) {
+    int tid = (blockIdx.x * blockDim.x + threadIdx.x) * two_dplus1;
+    if(tid < N) {
+        int t = out[tid+two_d-1];
+        out[tid+two_d-1] = out[tid+two_dplus1-1];
+        out[tid+two_dplus1-1] += t;
+    }
+}
+
+__global__ void set_last(int *out, int N) {
+    out[N - 1] = 0;
+}
+
 // exclusive_scan --
 //
 // Implementation of an exclusive scan on global memory array `input`,
@@ -54,7 +74,37 @@ void exclusive_scan(int* input, int N, int* result)
     // to CUDA kernel functions (that you must write) to implement the
     // scan.
 
+    int rounded_N = nextPow2(N);
+    int grid_size = 0;
+    for (int two_d = 1; two_d <= rounded_N/2; two_d*=2) {
+        int two_dplus1 = 2*two_d;
+        grid_size = (N / two_dplus1 - 1) / THREADS_PER_BLOCK + 1;
+        exclusive_scan_upsweep<<<grid_size, THREADS_PER_BLOCK>>>(result, input, N, two_d, two_dplus1);
+        cudaDeviceSynchronize();
+        cudaError_t error = cudaGetLastError();
+        if(error != cudaSuccess) {
+          // print the CUDA error message and exit
+          printf("CUDA error: %s\n", cudaGetErrorString(error));
+          exit(-1);
+        }
+    }
 
+    set_last<<<1,1>>>(result, rounded_N);
+    cudaDeviceSynchronize();
+
+    for (int two_d = rounded_N/2; two_d >= 1; two_d /= 2) {
+        int two_dplus1 = 2 * two_d;
+        grid_size = N / two_dplus1;
+        grid_size = (N / two_dplus1 - 1) / THREADS_PER_BLOCK + 1;
+        exclusive_scan_downsweep<<<grid_size, THREADS_PER_BLOCK>>>(result, input, N, two_d, two_dplus1);
+        cudaDeviceSynchronize();
+        cudaError_t error = cudaGetLastError();
+        if(error != cudaSuccess) {
+          // print the CUDA error message and exit
+          printf("CUDA error: %s\n", cudaGetErrorString(error));
+          exit(-1);
+        }
+    }
 }
 
 
@@ -102,6 +152,14 @@ double cudaScan(int* inarray, int* end, int* resultarray)
     double endTime = CycleTimer::currentSeconds();
        
     cudaMemcpy(resultarray, device_result, (end - inarray) * sizeof(int), cudaMemcpyDeviceToHost);
+
+    // for (int i = 0; i < N; i++) {
+    //     printf("%d, ", inarray[i]);
+    // }
+    // printf("\n\n");
+    // for (int i = 0; i < N; i++) {
+    //     printf("%d, ", resultarray[i]);
+    // }
 
     double overallDuration = endTime - startTime;
     return overallDuration; 

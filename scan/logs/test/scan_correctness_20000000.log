@@ -1,0 +1,9 @@
+---------------------------------------------------------
+Found 1 CUDA devices
+Device 0: NVIDIA GeForce RTX 3080
+   SMs:        68
+   Global mem: 9996 MB
+   CUDA Cap:   8.6
+---------------------------------------------------------
+Array size: 20000000
+CUDA error: an illegal memory access was encountered
